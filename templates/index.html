@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShelfScan — сканер домашньої бібліотеки</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📚</text></svg>">
+<style>
+  :root {
+    --paper: #f6f1e7; --card: #fffdf8; --ink: #2b2118; --muted: #7a6a58;
+    --accent: #b5522b; --accent-dark: #8f3d1d; --line: #e4d9c6; --ok: #2f7d4f; --err: #b3261e;
+    --serif: Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); }
+  header { background: var(--ink); color: var(--paper); padding: 18px 20px 14px; }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  .brand { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .brand h1 { font-family: var(--serif); font-size: 30px; margin: 0; letter-spacing: .5px; }
+  .brand h1 span { color: #e8a87c; }
+  .brand p { margin: 0; color: #cdbfa8; font-size: 14px; }
+  .shelf-pick { margin-top: 10px; font-size: 13px; color: #cdbfa8; display: flex; align-items: center; gap: 8px; }
+  .shelf-pick input { background: #3d3127; border: 1px solid #5a4a3b; color: var(--paper); border-radius: 6px;
+    padding: 4px 8px; width: 140px; font-size: 13px; }
+  main { padding: 18px 20px 40px; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .stat b { display: block; font-family: var(--serif); font-size: 26px; }
+  .stat span { color: var(--muted); font-size: 13px; }
+  .actions { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px;
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--card); color: var(--ink); padding: 10px 14px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; font-size: 16px; padding: 12px 18px; }
+  button.primary:hover { background: var(--accent-dark); }
+  .manual { display: flex; gap: 6px; flex: 1 1 260px; min-width: 0; }
+  .manual input { flex: 1; min-width: 0; font: inherit; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  .samples { width: 100%; font-size: 13px; color: var(--muted); }
+  .samples a { color: var(--accent); cursor: pointer; text-decoration: underline; margin-right: 10px; }
+  #scanner { display: none; margin-top: 12px; background: #000; border-radius: 12px; overflow: hidden; position: relative; }
+  #scanner.on { display: block; }
+  #reader { width: 100%; max-width: 520px; margin: 0 auto; }
+  #scanner .close { position: absolute; top: 8px; right: 8px; z-index: 5; }
+  .status { margin: 12px 0; min-height: 24px; font-size: 14px; }
+  .status.ok { color: var(--ok); } .status.err { color: var(--err); }
+  .timing { display: inline-block; margin-left: 8px; font-size: 12px; color: var(--muted); background: #efe6d6;
+    border-radius: 999px; padding: 2px 10px; }
+  h2 { font-family: var(--serif); font-weight: normal; margin: 22px 0 10px; display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: space-between; align-items: baseline; }
+  h2 small { font-family: var(--sans); font-size: 13px; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+  .book { background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; cursor: pointer;
+    transition: transform .15s, box-shadow .15s; display: flex; flex-direction: column; }
+  .book:hover { transform: translateY(-3px); box-shadow: 0 6px 16px rgba(43,33,24,.12); }
+  .book.new { animation: pop .9s ease; }
+  @keyframes pop { 0% { transform: scale(.85); box-shadow: 0 0 0 4px var(--accent); } 100% { transform: none; } }
+  .cover { aspect-ratio: 2 / 3; background: #e9dfcd; overflow: hidden; display: flex; align-items: center;
+    justify-content: center; text-align: center; font-family: var(--serif); color: var(--muted); padding: 10px; font-size: 14px; }
+  .cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .meta { padding: 8px 10px 10px; }
+  .meta .t { font-weight: 600; font-size: 14px; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .meta .a { color: var(--muted); font-size: 13px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .empty { text-align: center; color: var(--muted); padding: 40px 10px; border: 2px dashed var(--line); border-radius: 12px; }
+  dialog { border: none; border-radius: 14px; padding: 0; max-width: 560px; width: calc(100% - 30px); background: var(--card); color: var(--ink); }
+  dialog::backdrop { background: rgba(30,22,15,.55); }
+  .dlg { display: flex; gap: 16px; padding: 18px; }
+  .dlg img { width: 120px; border-radius: 6px; align-self: flex-start; background: #e9dfcd; }
+  .dlg h3 { font-family: var(--serif); margin: 0 0 4px; font-size: 20px; }
+  .dlg .sub { color: var(--muted); font-size: 14px; margin-bottom: 8px; }
+  .dlg dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 13px; margin: 0 0 8px; }
+  .dlg dt { color: var(--muted); }
+  .dlg .desc { font-size: 13px; line-height: 1.45; max-height: 160px; overflow: auto; }
+  .dlg-actions { display: flex; justify-content: space-between; padding: 0 18px 16px; gap: 8px; }
+  .danger { color: var(--err); border-color: #e8c3bf; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 20px 24px; }
+  @media (max-width: 600px) {
+    .actions button.primary { width: 100%; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .dlg { flex-direction: column; } .dlg img { width: 100px; }
+    .grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="brand">
+      <h1>Shelf<span>Scan</span></h1>
+      <p>Скануй штрихкод — книжка сама стане на полицю</p>
+    </div>
+    <div class="shelf-pick">Полиця:
+      <input id="shelfInput" maxlength="40" aria-label="Назва полиці">
+      <button id="shelfBtn" style="padding:4px 10px;font-size:13px">Відкрити</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="stats" aria-label="Статистика полиці">
+    <div class="stat"><b id="sBooks">0</b><span>книжок</span></div>
+    <div class="stat"><b id="sPages">0</b><span>сторінок разом</span></div>
+    <div class="stat"><b id="sAuthors">0</b><span>авторів</span></div>
+    <div class="stat"><b id="sTop">—</b><span>улюблений автор</span></div>
+  </section>
+
+  <section class="actions">
+    <button class="primary" id="scanBtn">📷 Сканувати штрихкод</button>
+    <form class="manual" id="manualForm">
+      <input id="isbnInput" inputmode="numeric" placeholder="або введи ISBN вручну, напр. 9780747532699" aria-label="ISBN">
+      <button type="submit">Додати</button>
+    </form>
+    <div class="samples">Без книжки під рукою:
+      <a data-isbn="9780747532699">Гаррі Поттер</a>
+      <a data-isbn="9780547928227">Гобіт</a>
+      <a data-isbn="9780141439518">Гордість і упередження</a>
+      <a data-isbn="9780451524935">1984</a>
+    </div>
+    <div id="scanner" style="width:100%">
+      <button class="close" id="closeScan">✕ Закрити</button>
+      <div id="reader"></div>
+    </div>
+  </section>
+
+  <div class="status" id="status" role="status"></div>
+
+  <h2>Моя полиця <small id="shelfInfo"></small></h2>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden>Полиця порожня — відскануй штрихкод на звороті будь-якої книжки 📚</div>
+</main>
+
+<footer>ShelfScan · PoC для курсу «Хмарні обчислення» · Google Books API + Cloud Firestore + Cloud Run</footer>
+
+<dialog id="dlg">
+  <div class="dlg">
+    <img id="dImg" alt="">
+    <div>
+      <h3 id="dTitle"></h3>
+      <div class="sub" id="dAuthors"></div>
+      <dl id="dMeta"></dl>
+      <div class="desc" id="dDesc"></div>
+    </div>
+  </div>
+  <div class="dlg-actions">
+    <button class="danger" id="dDelete">Прибрати з полиці</button>
+    <span>
+      <a id="dLink" target="_blank" rel="noopener"><button>Google Books ↗</button></a>
+      <button id="dClose">Закрити</button>
+    </span>
+  </div>
+</dialog>
+
+<script src="/static/html5-qrcode.min.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  let books = [];
+  let shelf = new URLSearchParams(location.search).get('shelf');
+  try { shelf = shelf || localStorage.getItem('shelf'); } catch (e) {}
+  shelf = (shelf || 'main').toLowerCase().replace(/[^a-z0-9-]/g, '') || 'main';
+  $('shelfInput').value = shelf;
+  let scanner = null, busy = false, lastCode = '', lastTime = 0, highlight = null;
+
+  function setStatus(text, kind, timing) {
+    const el = $('status');
+    el.className = 'status ' + (kind || '');
+    el.textContent = text;
+    if (timing) {
+      const s = document.createElement('span');
+      s.className = 'timing';
+      s.textContent = timing;
+      el.appendChild(s);
+    }
+  }
+
+  function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  function render() {
+    const grid = $('grid');
+    grid.innerHTML = '';
+    $('empty').hidden = books.length > 0;
+    books.forEach((b) => {
+      const card = document.createElement('div');
+      card.className = 'book' + (b.isbn === highlight ? ' new' : '');
+      const cover = document.createElement('div');
+      cover.className = 'cover';
+      if (b.cover) {
+        const img = document.createElement('img');
+        img.src = b.cover; img.alt = b.title; img.loading = 'lazy';
+        img.onerror = () => { cover.textContent = b.title; };   // обкладинка не завантажилась
+        cover.appendChild(img);
+      } else cover.textContent = b.title;
+      card.appendChild(cover);
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.innerHTML = `<div class="t">${esc(b.title)}</div><div class="a">${esc((b.authors || []).join(', ') || 'Автор невідомий')}${b.year ? ' · ' + b.year : ''}</div>`;
+      card.appendChild(meta);
+      card.addEventListener('click', () => openBook(b));
+      grid.appendChild(card);
+    });
+    highlight = null;
+    // статистика
+    const pages = books.reduce((s, b) => s + (b.pages || 0), 0);
+    const count = {};
+    books.forEach(b => (b.authors || []).forEach(a => count[a] = (count[a] || 0) + 1));
+    const authors = Object.keys(count);
+    const top = authors.sort((a, b) => count[b] - count[a])[0];
+    $('sBooks').textContent = books.length;
+    $('sPages').textContent = pages.toLocaleString('uk-UA');
+    $('sAuthors').textContent = authors.length;
+    $('sTop').textContent = top ? top.split(' ').slice(-1)[0] : '—';
+    $('sTop').title = top || '';
+  }
+
+  async function loadShelf(quiet) {
+    try {
+      const r = await fetch(`/api/shelf?shelf=${encodeURIComponent(shelf)}`);
+      const d = await r.json();
+      const changed = JSON.stringify(d.books.map(b => b.isbn)) !== JSON.stringify(books.map(b => b.isbn));
+      if (changed || !quiet) {
+        if (quiet && d.books.length && (!books.length || d.books[0].isbn !== books[0].isbn)) highlight = d.books[0].isbn;
+        books = d.books;
+        render();
+      }
+      $('shelfInfo').textContent = `полиця «${d.shelf}» · сховище: ${d.storage === 'firestore' ? 'Cloud Firestore' : 'пам’ять (локально)'}`;
+    } catch (e) {
+      if (!quiet) setStatus('Не вдалося завантажити полицю', 'err');
+    }
+  }
+
+  async function addIsbn(isbn) {
+    if (busy) return;
+    busy = true;
+    setStatus(`Шукаю ISBN ${isbn} у Google Books…`);
+    try {
+      const r = await fetch('/api/shelf', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isbn, shelf }),
+      });
+      const d = await r.json();
+      if (r.status === 201) {
+        highlight = d.book.isbn;
+        setStatus(`✓ «${d.book.title}» додано на полицю`, 'ok', `Google Books API: ${d.api_ms} мс · Firestore: ${d.db_ms} мс`);
+        if (navigator.vibrate) navigator.vibrate(120);
+      } else if (d.duplicate) {
+        setStatus(`«${d.book.title}» вже є на цій полиці`, 'ok');
+      } else {
+        setStatus((d.message || 'Помилка') + (d.isbn ? ` (ISBN ${d.isbn})` : ''), 'err');
+      }
+      await loadShelf();
+    } catch (e) {
+      setStatus('Сервер не відповідає', 'err');
+    } finally {
+      busy = false;
+    }
+  }
+
+  // ---------- сканер штрихкодів (працює лише через HTTPS або localhost)
+  async function startScan() {
+    $('scanner').classList.add('on');
+    setStatus('Наведи камеру на штрихкод на звороті книжки (починається з 978 або 979)');
+    try {
+      scanner = new Html5Qrcode('reader', {
+        formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A],
+        verbose: false,
+      });
+      await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 280, height: 140 } }, (code) => {
+        const now = Date.now();
+        if (code === lastCode && now - lastTime < 4000) return;   // не додавати двічі
+        lastCode = code; lastTime = now;
+        if (!/^97[89]/.test(code)) { setStatus(`Код ${code} — це не ISBN книжки`, 'err'); return; }
+        stopScan();
+        addIsbn(code);
+      });
+    } catch (e) {
+      setStatus('Немає доступу до камери. Дозволь доступ або введи ISBN вручну.', 'err');
+      stopScan();
+    }
+  }
+  async function stopScan() {
+    $('scanner').classList.remove('on');
+    if (scanner) { try { await scanner.stop(); } catch (e) {} try { scanner.clear(); } catch (e) {} scanner = null; }
+  }
+
+  // ---------- деталі книжки
+  let current = null;
+  function openBook(b) {
+    current = b;
+    $('dImg').src = b.cover || '';
+    $('dImg').style.display = b.cover ? '' : 'none';
+    $('dTitle').textContent = b.title + (b.subtitle ? '. ' + b.subtitle : '');
+    $('dAuthors').textContent = (b.authors || []).join(', ') || 'Автор невідомий';
+    const rows = [['ISBN', b.isbn], ['Рік', b.year], ['Сторінок', b.pages || null], ['Видавництво', b.publisher],
+                  ['Жанр', (b.categories || []).join(', ')], ['Мова', b.language], ['Рейтинг', b.rating ? b.rating + ' / 5' : null]];
+    $('dMeta').innerHTML = rows.filter(r => r[1]).map(r => `<dt>${r[0]}</dt><dd style="margin:0">${esc(r[1])}</dd>`).join('');
+    $('dDesc').textContent = b.description || 'Опису немає.';
+    $('dLink').href = b.link || ('https://books.google.com/books?vid=ISBN' + b.isbn);
+    $('dlg').showModal();
+  }
+  $('dClose').onclick = () => $('dlg').close();
+  $('dDelete').onclick = async () => {
+    if (!current) return;
+    await fetch(`/api/shelf/${current.isbn}?shelf=${encodeURIComponent(shelf)}`, { method: 'DELETE' });
+    $('dlg').close();
+    setStatus(`«${current.title}» прибрано з полиці`);
+    loadShelf();
+  };
+
+  // ---------- події
+  $('scanBtn').onclick = startScan;
+  $('closeScan').onclick = () => { stopScan(); setStatus(''); };
+  $('manualForm').onsubmit = (e) => {
+    e.preventDefault();
+    const v = $('isbnInput').value.trim();
+    if (v) { addIsbn(v); $('isbnInput').value = ''; }
+  };
+  document.querySelectorAll('.samples a').forEach(a => a.onclick = () => addIsbn(a.dataset.isbn));
+  $('shelfBtn').onclick = () => {
+    shelf = $('shelfInput').value.toLowerCase().replace(/[^a-z0-9-]/g, '') || 'main';
+    $('shelfInput').value = shelf;
+    try { localStorage.setItem('shelf', shelf); } catch (e) {}
+    history.replaceState(null, '', '?shelf=' + shelf);
+    books = []; loadShelf();
+  };
+
+  loadShelf();
+  setInterval(() => { if (!document.hidden) loadShelf(true); }, 4000); // синхронізація між пристроями
+})();
+</script>
+</body>
+</html>
