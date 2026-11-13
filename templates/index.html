@@ -42,6 +42,10 @@
   #scanner.on { display: block; }
   #reader { width: 100%; max-width: 520px; margin: 0 auto; }
   #scanner .close { position: absolute; top: 8px; right: 8px; z-index: 5; }
+  .zoom { display: flex; justify-content: center; align-items: center; gap: 14px; padding: 10px; background: #111; color: #fff; }
+  .zoom[hidden] { display: none; }
+  .zoom button { font-size: 20px; width: 52px; height: 44px; background: #333; color: #fff; border-color: #555; }
+  .photo-btn { cursor: pointer; border: 1px solid var(--accent); color: var(--accent); border-radius: 8px; padding: 11px 14px; font-weight: 600; background: #fff; }
   .status { margin: 12px 0; min-height: 24px; font-size: 14px; }
   .status.ok { color: var(--ok); } .status.err { color: var(--err); }
   .timing { display: inline-block; margin-left: 8px; font-size: 12px; color: var(--muted); background: #efe6d6;
@@ -74,7 +78,7 @@
   .danger { color: var(--err); border-color: #e8c3bf; }
   footer { text-align: center; color: var(--muted); font-size: 12px; padding: 0 20px 24px; }
   @media (max-width: 600px) {
-    .actions button.primary { width: 100%; }
+    .actions button.primary, .photo-btn { width: 100%; text-align: center; }
     .stats { grid-template-columns: repeat(2, 1fr); }
     .dlg { flex-direction: column; } .dlg img { width: 100px; }
     .grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
@@ -105,6 +109,9 @@
 
   <section class="actions">
     <button class="primary" id="scanBtn">📷 Сканувати штрихкод</button>
+    <label class="photo-btn">🖼 Сфотографувати штрихкод
+      <input type="file" id="photoInput" accept="image/*" capture="environment" hidden>
+    </label>
     <form class="manual" id="manualForm">
       <input id="isbnInput" inputmode="numeric" placeholder="або введи ISBN вручну, напр. 9780747532699" aria-label="ISBN">
       <button type="submit">Додати</button>
@@ -118,7 +125,13 @@
     <div id="scanner" style="width:100%">
       <button class="close" id="closeScan">✕ Закрити</button>
       <div id="reader"></div>
+      <div class="zoom" id="zoomBar" hidden>
+        <button id="zoomOut" aria-label="Зменшити">➖</button>
+        <span id="zoomVal">1×</span>
+        <button id="zoomIn" aria-label="Збільшити">➕</button>
+      </div>
     </div>
+    <div id="fileReader" hidden></div>
   </section>
 
   <div class="status" id="status" role="status"></div>
@@ -255,30 +268,87 @@
   }
 
   // ---------- сканер штрихкодів (працює лише через HTTPS або localhost)
+  const FORMATS = () => [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A];
+  const LIB_CFG = () => ({
+    formatsToSupport: FORMATS(), verbose: false,
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true },  // вбудований сканер Chrome/Android, якщо є
+  });
+  let zoom = null;
+
+  function onCode(code) {
+    const now = Date.now();
+    if (code === lastCode && now - lastTime < 4000) return;   // не додавати двічі
+    lastCode = code; lastTime = now;
+    if (!/^97[89]/.test(code)) { setStatus(`Код ${code} — це не ISBN книжки (шукай штрихкод, що починається з 978)`, 'err'); return; }
+    stopScan();
+    addIsbn(code);
+  }
+
   async function startScan() {
     $('scanner').classList.add('on');
-    setStatus('Наведи камеру на штрихкод на звороті книжки (починається з 978 або 979)');
+    setStatus('Тримай телефон на відстані 20–30 см, щоб штрихкод був чітким, і збільш його кнопкою ➕');
     try {
-      scanner = new Html5Qrcode('reader', {
-        formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.UPC_A],
-        verbose: false,
-      });
-      await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 280, height: 140 } }, (code) => {
-        const now = Date.now();
-        if (code === lastCode && now - lastTime < 4000) return;   // не додавати двічі
-        lastCode = code; lastTime = now;
-        if (!/^97[89]/.test(code)) { setStatus(`Код ${code} — це не ISBN книжки`, 'err'); return; }
-        stopScan();
-        addIsbn(code);
-      });
+      scanner = new Html5Qrcode('reader', LIB_CFG());
+      await scanner.start(
+        { facingMode: 'environment' },
+        {
+          fps: 15,
+          // широка рамка під форму штрихкоду книжки
+          qrbox: (w, h) => ({ width: Math.floor(w * 0.85), height: Math.floor(Math.min(h * 0.45, w * 0.5)) }),
+          videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 },
+                              advanced: [{ focusMode: 'continuous' }] },
+        },
+        onCode);
+      setupZoom();
     } catch (e) {
-      setStatus('Немає доступу до камери. Дозволь доступ або введи ISBN вручну.', 'err');
+      setStatus('Немає доступу до камери. Відкрий сайт у Chrome/Safari (не в Telegram) і дозволь камеру — або натисни «Сфотографувати штрихкод».', 'err');
       stopScan();
     }
   }
+
+  function setupZoom() {
+    $('zoomBar').hidden = true;
+    zoom = null;
+    try {
+      const z = scanner.getRunningTrackCameraCapabilities().zoomFeature();
+      if (z.isSupported()) {
+        zoom = z;
+        const target = Math.min(z.max(), 2);          // одразу 2x — можна тримати телефон далі
+        z.apply(target);
+        $('zoomVal').textContent = target.toFixed(1) + '×';
+        $('zoomBar').hidden = false;
+      }
+    } catch (e) { /* камера без зуму */ }
+  }
+  function changeZoom(dir) {
+    if (!zoom) return;
+    const step = Math.max(zoom.step() || 0.1, 0.5);
+    const v = Math.min(zoom.max(), Math.max(zoom.min(), (zoom.value() || 1) + dir * step));
+    zoom.apply(v);
+    $('zoomVal').textContent = v.toFixed(1) + '×';
+  }
+
   async function stopScan() {
     $('scanner').classList.remove('on');
+    $('zoomBar').hidden = true;
     if (scanner) { try { await scanner.stop(); } catch (e) {} try { scanner.clear(); } catch (e) {} scanner = null; }
+  }
+
+  // запасний варіант: звичайне фото з автофокусом, потім розпізнавання
+  async function scanPhoto(file) {
+    if (!file) return;
+    await stopScan();
+    setStatus('Розпізнаю штрихкод на фото…');
+    const reader = new Html5Qrcode('fileReader', LIB_CFG());
+    try {
+      const code = await reader.scanFile(file, false);
+      onCode(code);
+    } catch (e) {
+      setStatus('На фото не знайшлося штрихкоду. Сфотографуй ближче, рівно і при хорошому світлі — або введи ISBN вручну.', 'err');
+    } finally {
+      try { reader.clear(); } catch (e) {}
+      $('photoInput').value = '';
+    }
   }
 
   // ---------- деталі книжки
@@ -307,6 +377,9 @@
 
   // ---------- події
   $('scanBtn').onclick = startScan;
+  $('zoomIn').onclick = () => changeZoom(1);
+  $('zoomOut').onclick = () => changeZoom(-1);
+  $('photoInput').onchange = (e) => scanPhoto(e.target.files[0]);
   $('closeScan').onclick = () => { stopScan(); setStatus(''); };
   $('manualForm').onsubmit = (e) => {
     e.preventDefault();

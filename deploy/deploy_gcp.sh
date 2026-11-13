@@ -29,10 +29,20 @@ fi
 echo "== 3/5 Права для сервісного акаунта..."
 PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
 SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-for ROLE in roles/datastore.user roles/cloudbuild.builds.builder roles/storage.objectViewer roles/artifactregistry.writer roles/logging.logWriter; do
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$SA" \
-    --role="$ROLE" --condition=None --quiet >/dev/null
+NEW_ROLES=0
+for ROLE in roles/datastore.user roles/run.builder roles/serviceusage.serviceUsageConsumer \
+            roles/cloudbuild.builds.builder roles/storage.objectViewer roles/artifactregistry.writer roles/logging.logWriter; do
+  if ! gcloud projects get-iam-policy "$PROJECT_ID" --flatten="bindings[].members" \
+       --filter="bindings.role=$ROLE AND bindings.members=serviceAccount:$SA" --format="value(bindings.role)" | grep -q .; then
+    gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$SA" \
+      --role="$ROLE" --condition=None --quiet >/dev/null
+    NEW_ROLES=1
+  fi
 done
+if [ "$NEW_ROLES" = "1" ]; then
+  echo "Нові права застосовуються в Google Cloud не одразу — чекаю 90 секунд..."
+  sleep 90
+fi
 
 echo "== 4/5 API-ключ для Google Books..."
 KEY_NAME=$(gcloud services api-keys list --filter="displayName=shelfscan-books" --format="value(name)" | head -n1)
